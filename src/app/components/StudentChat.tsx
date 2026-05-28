@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import {
   Send, UserX, User, LogOut, Sparkles, MessageSquare,
-  MoreVertical, Trash2, UserCheck, AlertTriangle, Plus,
+  MoreVertical, Trash2, UserCheck, AlertTriangle, Plus, PhoneCall,
   CheckCircle, RefreshCw, Heart
 } from 'lucide-react';
 import { analyzeMessage } from '../utils/crisisDetection';
@@ -10,6 +10,25 @@ import { messageStore, ChatSession, getDisplayName } from '../utils/messageStore
 import { useAuth } from '../context/AuthContext';
 
 type ChatState = 'setup' | 'resolved' | 'chatting';
+
+const crisisHotlines = [
+  {
+    title: 'Crisis Text Line',
+    detail: '741741 to reach a live volunteer Crisis Counselor. Free, 24/7, confidential.',
+  },
+  {
+    title: 'Davao City Health Office 24/7',
+    detail: '0927 604 5797 • 0939 340 5675 • 0961 526 2861',
+  },
+  {
+    title: 'National Center for Mental Health',
+    detail: '0917 899 8727 (USAP) • 989-8727 (USAP)',
+  },
+  {
+    title: 'In Touch Community Services Crisis Lines',
+    detail: '0917 800 1123 • 0922 893 8944 • 893-7603',
+  },
+];
 
 export function StudentChat() {
   const { user, logout } = useAuth();
@@ -19,14 +38,17 @@ export function StudentChat() {
   const [session, setSession] = useState<ChatSession | null>(null);
   const [lastResolvedSession, setLastResolvedSession] = useState<ChatSession | null>(null);
   const [isAnonymous, setIsAnonymous] = useState(true);
+  const [anonymousMode, setAnonymousMode] = useState<'generated' | 'clue'>('generated');
+  const [anonymousClue, setAnonymousClue] = useState('');
   const [currentMessage, setCurrentMessage] = useState('');
+  const [isScrolling, setIsScrolling] = useState(false);
 
   // Chat menu state
   const [showMenu, setShowMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const scrollTimeoutRef = useRef<number | null>(null);
 
   const handleLogout = () => {
     logout();
@@ -35,8 +57,19 @@ export function StudentChat() {
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [session?.messages]);
+    messagesContainerRef.current?.scrollTo({
+      top: messagesContainerRef.current.scrollHeight,
+      behavior: 'smooth',
+    });
+  }, [session?.messages.length]);
+
+  useEffect(() => {
+    return () => {
+      if (scrollTimeoutRef.current !== null) {
+        window.clearTimeout(scrollTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Determine initial state based on student's sessions
   useEffect(() => {
@@ -64,7 +97,9 @@ export function StudentChat() {
 
     syncState();
     const unsubscribe = messageStore.subscribe(syncState);
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+    };
   }, [user?.email]);
 
   // Close menu when clicking outside
@@ -80,10 +115,12 @@ export function StudentChat() {
 
   const startNewChat = () => {
     if (!user?.email) return;
+    const customNickname = anonymousMode === 'clue' ? anonymousClue.trim() : undefined;
     const newSession = messageStore.createSession(
       user.email,
       user.name,
-      isAnonymous
+      isAnonymous,
+      customNickname
     );
     setSession(newSession);
     setChatState('chatting');
@@ -147,6 +184,18 @@ export function StudentChat() {
     setShowDeleteConfirm(false);
   };
 
+  const handleMessagesScroll = () => {
+    setIsScrolling(true);
+
+    if (scrollTimeoutRef.current !== null) {
+      window.clearTimeout(scrollTimeoutRef.current);
+    }
+
+    scrollTimeoutRef.current = window.setTimeout(() => {
+      setIsScrolling(false);
+    }, 900);
+  };
+
   // ── Setup Screen ──────────────────────────────────────────────────────────
   if (chatState === 'setup') {
     return (
@@ -200,7 +249,7 @@ export function StudentChat() {
                     </p>
                     <p className="text-xs text-gray-500 mt-0.5">
                       {isAnonymous
-                        ? 'A nickname will be assigned to you'
+                        ? ' '
                         : `Your name "${user?.name}" will be visible`}
                     </p>
                   </div>
@@ -216,9 +265,38 @@ export function StudentChat() {
                 </label>
               </div>
               {isAnonymous && (
-                <p className="text-xs text-purple-700 bg-purple-100/60 px-3 py-2 rounded-lg mt-2">
-                  A calming nickname will be generated for you (e.g., "Gentle River"). It stays the same for your entire conversation.
-                </p>
+                <div className="mt-3 space-y-3">
+                  <p className="text-xs text-purple-700 bg-purple-100/60 px-3 py-2 rounded-lg">
+                    Choose Auto Generate name or input a custom name.
+                  </p>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() => setAnonymousMode('generated')}
+                      className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all border ${anonymousMode === 'generated' ? 'bg-purple-600 text-white border-purple-600 shadow-md' : 'bg-white text-gray-600 border-gray-200 hover:border-purple-300'}`}
+                    >
+                      Auto Generate name
+                    </button>
+                    <button
+                      onClick={() => setAnonymousMode('clue')}
+                      className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all border ${anonymousMode === 'clue' ? 'bg-purple-600 text-white border-purple-600 shadow-md' : 'bg-white text-gray-600 border-gray-200 hover:border-purple-300'}`}
+                    >
+                      Custom
+                    </button>
+                  </div>
+
+                  {anonymousMode === 'clue' && (
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-700 mb-1.5">Custom name</label>
+                      <input
+                        value={anonymousClue}
+                        onChange={e => setAnonymousClue(e.target.value)}
+                        placeholder="e.g. blue hoodie, room 12, classmate"
+                        className="w-full px-3 py-2.5 bg-white border border-purple-200 rounded-xl text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
+                      />
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 
@@ -230,14 +308,14 @@ export function StudentChat() {
               Begin Conversation
             </button>
 
-            <div className="mt-5 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+            {/* <div className="mt-5 p-4 bg-amber-50 border border-amber-200 rounded-xl">
               <div className="flex gap-3">
                 <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
                 <p className="text-xs text-amber-800 leading-relaxed">
                   If you are in immediate danger, please call emergency services (911) or a crisis hotline directly.
                 </p>
               </div>
-            </div>
+            </div> */}
           </div>
         </div>
       </div>
@@ -322,200 +400,236 @@ export function StudentChat() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-50 via-rose-50 to-fuchsia-50 relative overflow-hidden">
-      <div className="max-w-3xl mx-auto h-screen flex flex-col px-4 py-4 relative z-10">
+      <div className="max-w-7xl mx-auto h-screen flex flex-col lg:flex-row px-4 py-4 relative z-10 isolate gap-2">
 
-        {/* Chat Header */}
-        <div className="bg-white/95 backdrop-blur-xl rounded-t-2xl shadow-lg border border-pink-200 border-b-0 px-5 py-4 flex items-center gap-4">
-          <div className="bg-gradient-to-br from-pink-400 to-rose-500 p-2.5 rounded-xl shadow-md flex-shrink-0">
-            {session.isAnonymous && !session.revealedRealName ? (
-              <UserX className="w-5 h-5 text-white" />
-            ) : (
-              <User className="w-5 h-5 text-white" />
-            )}
-          </div>
+        {/* Support sidebar */}
+        <div className="hidden lg:block w-72 shrink-0">
+          <div className="sticky top-4 bg-white/90 backdrop-blur-xl rounded-2xl shadow-lg border border-pink-200 px-4 py-4 relative z-30">
+            <div className="flex items-center gap-2 text-pink-700 font-semibold text-sm mb-3">
+              <PhoneCall className="w-4 h-4" />
+              Helpline
+            </div>
 
-          <div className="flex-1 min-w-0">
-            <p className="font-semibold text-gray-900 truncate">{displayName}</p>
-            <div className="flex items-center gap-2 mt-0.5">
-              <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse flex-shrink-0" />
-              <p className="text-xs text-gray-500">
-                {session.isAnonymous && !session.revealedRealName
-                  ? 'Anonymous Session'
-                  : 'Identified Session'}
-                {session.status === 'resolved' && (
-                  <span className="ml-2 px-2 py-0.5 bg-gray-200 text-gray-600 rounded-full text-xs font-medium">Resolved</span>
-                )}
+            <div className="space-y-3 text-sm leading-relaxed text-gray-700">
+              <p className="text-sm text-gray-700">
+                If you need immediate support, you can also reach out — these helplines are available 24/7. You're not alone.
+              </p>
+              <p><strong>Davao City Health Office 24/7:</strong><br/>0927 604 5797, <br/>0939 340 5675, <br/>0961 526 2861.</p>
+              <p><strong>National Center for Mental Health:</strong> 0917 899 8727 (USAP) or <br/>989-8727 (USAP).</p>
+              <p><strong>In Touch Community Services Crisis Lines:</strong> 0917 800 1123, <br/>0922 893 8944, <br/>893-7603.</p>
+              <p><strong>Tawag Paglaum - Centro Bisaya:</strong> 0966-467-9626, <br/>
+                <a href="https://www.facebook.com/profile.php?id=100068862624004" target="_blank" rel="noopener noreferrer" className="HelplineCardV2_websiteLink__LVCnd HelplineCardV2_linkBase__Wx3Ep text-blue-600 font-semibold underline" dir="ltr" data-testid="url">facebook.com</a>
+              </p>
+              <p><strong>NCMH Crisis Hotline:</strong> tel:1800-1888-1553, <br/>
+                <a href="https://www.facebook.com/ncmhcrisishotline?mibextid=LQQJ4d" target="_blank" rel="noopener noreferrer" className="HelplineCardV2_websiteLink__LVCnd HelplineCardV2_linkBase__Wx3Ep text-blue-600 font-semibold underline" dir="ltr" data-testid="url">facebook.com</a>
               </p>
             </div>
-          </div>
 
-          {/* AI indicator */}
-          <div className="hidden sm:flex items-center gap-1.5 bg-pink-50 px-3 py-1.5 rounded-full border border-pink-200">
-            <Sparkles className="w-3.5 h-3.5 text-pink-600" />
-            <span className="text-xs text-pink-700 font-medium">AI-Monitored</span>
-          </div>
-
-          {/* ⋮ Menu */}
-          <div className="relative flex-shrink-0" ref={menuRef}>
             <button
-              onClick={() => setShowMenu(!showMenu)}
-              className="p-2 rounded-xl hover:bg-pink-50 transition-colors text-gray-500 hover:text-gray-700"
+              onClick={handleLogout}
+              className="mt-4 inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-white text-gray-700 hover:text-gray-900 rounded-xl shadow-sm hover:shadow-md transition-all border border-gray-200 text-sm font-medium"
             >
-              <MoreVertical className="w-5 h-5" />
+              <LogOut className="w-4 h-4" />
+              Log out
             </button>
+          </div>
+        </div>
 
-            {showMenu && (
-              <div className="absolute right-0 top-11 bg-white rounded-2xl shadow-2xl border border-gray-100 w-52 z-20 overflow-hidden py-1">
-                {/* Show Real Name / Use Nickname — only for anonymous sessions */}
-                {session.isAnonymous && (
+        <div className="flex-1 min-w-0 flex flex-col gap-0 relative z-10">
+          {/* Chat Header */}
+          <div className="bg-white/95 backdrop-blur-xl rounded-t-2xl shadow-lg border border-pink-200 border-b-0 px-5 py-4 flex items-center gap-4 overflow-visible relative z-30">
+            <div className="bg-gradient-to-br from-pink-400 to-rose-500 p-2.5 rounded-xl shadow-md flex-shrink-0">
+              {session.isAnonymous && !session.revealedRealName ? (
+                <UserX className="w-5 h-5 text-white" />
+              ) : (
+                <User className="w-5 h-5 text-white" />
+              )}
+            </div>
+
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-gray-900 truncate">{displayName}</p>
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse flex-shrink-0" />
+                <p className="text-xs text-gray-500">
+                  {session.isAnonymous && !session.revealedRealName
+                    ? 'Anonymous Session'
+                    : 'Identified Session'}
+                  {session.status === 'resolved' && (
+                    <span className="ml-2 px-2 py-0.5 bg-gray-200 text-gray-600 rounded-full text-xs font-medium">Resolved</span>
+                  )}
+                </p>
+              </div>
+            </div>
+
+            {/* AI indicator
+            <div className="hidden sm:flex items-center gap-1.5 bg-pink-50 px-3 py-1.5 rounded-full border border-pink-200">
+              <Sparkles className="w-3.5 h-3.5 text-pink-600" />
+              <span className="text-xs text-pink-700 font-medium">AI-Monitored</span>
+            </div> */}
+
+            {/* ⋮ Menu */}
+            <div className="relative flex-shrink-0 z-[60]" ref={menuRef}>
+              <button
+                onClick={() => setShowMenu(!showMenu)}
+                aria-label="Conversation options"
+                aria-expanded={showMenu}
+                className="p-2 rounded-xl hover:bg-pink-50 transition-colors text-gray-500 hover:text-gray-700"
+              >
+                <MoreVertical className="w-5 h-5" />
+              </button>
+
+              {showMenu && (
+                <div className="absolute right-0 top-full mt-2 bg-white rounded-2xl shadow-2xl border border-gray-100 w-64 max-w-[calc(100vw-2rem)] z-[70] overflow-hidden py-1">
+                  {session.isAnonymous && (
+                    <button
+                      onClick={handleToggleRealName}
+                      className="w-full flex items-start gap-3 px-4 py-3 hover:bg-blue-50 transition-colors text-left"
+                    >
+                      <UserCheck className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-blue-700 leading-5">
+                          {session.revealedRealName ? 'Use Nickname Again' : 'Show Real Name'}
+                        </p>
+                        <p className="text-xs text-blue-500 mt-0.5 leading-4">
+                          {session.revealedRealName
+                            ? 'Switch back to your anonymous nickname'
+                            : 'Let the counselor see your real name'}
+                        </p>
+                      </div>
+                    </button>
+                  )}
+
+                  {session.isAnonymous && (
+                    <div className="mx-4 my-1 border-t-2 border-dashed border-gray-200" />
+                  )}
+
                   <button
-                    onClick={handleToggleRealName}
-                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-blue-50 transition-colors text-left"
+                    onClick={handleDeleteConversation}
+                    className="w-full flex items-start gap-3 px-4 py-3 hover:bg-red-50 transition-colors text-left"
                   >
-                    <UserCheck className="w-4 h-4 text-blue-500 flex-shrink-0" />
-                    <div>
-                      <p className="text-sm font-medium text-blue-700">
-                        {session.revealedRealName ? 'Use Nickname Again' : 'Show Real Name'}
-                      </p>
-                      <p className="text-xs text-blue-500 mt-0.5">
-                        {session.revealedRealName
-                          ? 'Switch back to your anonymous nickname'
-                          : 'Let the counselor see your real name'}
-                      </p>
+                    <Trash2 className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-red-700">Delete Conversation</p>
+                      <p className="text-xs text-red-400 mt-0.5">Permanently removes all messages</p>
                     </div>
                   </button>
-                )}
 
-                {/* Clear visual separator between action types */}
-                {session.isAnonymous && (
-                  <div className="mx-4 my-1 border-t-2 border-dashed border-gray-200" />
-                )}
+                  <div className="mx-4 my-1 border-t border-gray-100" />
+                  <button
+                    onClick={handleLogout}
+                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-red-100 transition-colors text-left"
+                  >
+                    <LogOut className="w-4 h-4 text-red-400 flex-shrink-0" />
+                    <p className="text-sm text-red-400">Sign Out</p>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
 
-                {/* Delete — clearly separated and red */}
+          {/* Delete Confirmation */}
+          {showDeleteConfirm && (
+            <div className="bg-red-50 border-x border-red-200 px-5 py-4 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0" />
+                <p className="text-sm text-red-800 font-medium">
+                  Delete this conversation? This cannot be undone.
+                </p>
+              </div>
+              <div className="flex gap-2 flex-shrink-0">
                 <button
-                  onClick={handleDeleteConversation}
-                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-red-50 transition-colors text-left"
+                  onClick={cancelDelete}
+                  className="px-4 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
                 >
-                  <Trash2 className="w-4 h-4 text-red-500 flex-shrink-0" />
-                  <div>
-                    <p className="text-sm font-medium text-red-700">Delete Conversation</p>
-                    <p className="text-xs text-red-400 mt-0.5">Permanently removes all messages</p>
-                  </div>
+                  Cancel
                 </button>
-
-                {/* Logout option at bottom */}
-                <div className="mx-4 my-1 border-t border-gray-100" />
                 <button
-                  onClick={handleLogout}
-                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left"
+                  onClick={confirmDelete}
+                  className="px-4 py-1.5 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors font-medium"
                 >
-                  <LogOut className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                  <p className="text-sm text-gray-600">Sign Out</p>
+                  Delete
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Messages */}
+          <div
+            ref={messagesContainerRef}
+            onScroll={handleMessagesScroll}
+            className={`flex-1 min-h-0 bg-white/90 backdrop-blur-xl px-5 pt-0 pb-5 overflow-y-auto border-x border-pink-200 relative z-10 scrollbar-fade ${isScrolling ? 'scrollbar-fade--active' : ''}`}
+          >
+            {session.messages.length === 0 ? (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                  <div className="w-16 h-16 bg-gradient-to-br from-pink-100 to-rose-100 rounded-full flex items-center justify-center mx-auto mb-4 shadow-md">
+                    <MessageSquare className="w-8 h-8 text-pink-500" />
+                  </div>
+                  <p className="text-gray-500 font-medium">Start by sending a message</p>
+                  <p className="text-gray-400 text-sm mt-1">We're here to listen and support you 💗</p>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-5">
+                {session.messages.map(msg => (
+                  <div
+                    key={msg.id}
+                    className={`flex ${msg.sender === 'student' ? 'justify-end' : 'justify-start'}`}
+                  >
+                    <div
+                      className={`max-w-[78%] rounded-2xl px-5 py-3.5 shadow-md ${
+                        msg.sender === 'student'
+                          ? 'bg-gradient-to-br from-pink-500 to-rose-500 text-white'
+                          : 'bg-white border border-pink-200 text-gray-900'
+                      }`}
+                    >
+                      {msg.sender === 'counselor' && (
+                        <p className="text-xs font-semibold text-pink-600 mb-1">Counselor</p>
+                      )}
+                      <p className="whitespace-pre-wrap leading-relaxed text-sm">{msg.content}</p>
+                      <p className={`text-xs mt-2 ${msg.sender === 'student' ? 'text-pink-200' : 'text-gray-400'}`}>
+                        {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Input Area */}
+          <div className="bg-white/95 backdrop-blur-xl rounded-b-2xl shadow-lg border border-pink-200 border-t-0 p-4 relative z-20">
+            {session.status === 'resolved' ? (
+              <div className="text-center py-3">
+                <p className="text-sm text-gray-600 mb-3">This conversation has been resolved by your counselor.</p>
+                <button
+                  onClick={continueResolvedSession}
+                  className="inline-flex items-center gap-2 bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 text-white font-semibold py-2.5 px-6 rounded-xl transition-all shadow-md"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  Continue Conversation
+                </button>
+              </div>
+            ) : (
+              <div className="flex gap-3">
+                <textarea
+                  value={currentMessage}
+                  onChange={e => setCurrentMessage(e.target.value)}
+                  onKeyDown={handleKeyPress}
+                  placeholder="Type your message here..."
+                  rows={2}
+                  className="flex-1 px-4 py-3 bg-gray-50 border border-pink-200 rounded-xl resize-none focus:outline-none focus:border-pink-400 focus:ring-2 focus:ring-pink-100 focus:bg-white transition-all text-gray-900 placeholder-gray-400 text-sm"
+                />
+                <button
+                  onClick={sendMessage}
+                  disabled={!currentMessage.trim()}
+                  className="bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 disabled:from-gray-300 disabled:to-gray-400 text-white p-3.5 rounded-xl transition-all duration-300 shadow-lg hover:shadow-xl disabled:shadow-none self-end"
+                >
+                  <Send className="w-5 h-5" />
                 </button>
               </div>
             )}
           </div>
-        </div>
-
-        {/* Delete Confirmation */}
-        {showDeleteConfirm && (
-          <div className="bg-red-50 border-x border-red-200 px-5 py-4 flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0" />
-              <p className="text-sm text-red-800 font-medium">
-                Delete this conversation? This cannot be undone.
-              </p>
-            </div>
-            <div className="flex gap-2 flex-shrink-0">
-              <button
-                onClick={cancelDelete}
-                className="px-4 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmDelete}
-                className="px-4 py-1.5 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors font-medium"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Messages */}
-        <div className="flex-1 bg-white/90 backdrop-blur-xl px-5 py-5 overflow-y-auto border-x border-pink-200">
-          {session.messages.length === 0 ? (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center">
-                <div className="w-16 h-16 bg-gradient-to-br from-pink-100 to-rose-100 rounded-full flex items-center justify-center mx-auto mb-4 shadow-md">
-                  <MessageSquare className="w-8 h-8 text-pink-500" />
-                </div>
-                <p className="text-gray-500 font-medium">Start by sending a message</p>
-                <p className="text-gray-400 text-sm mt-1">We're here to listen and support you 💗</p>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-5">
-              {session.messages.map(msg => (
-                <div
-                  key={msg.id}
-                  className={`flex ${msg.sender === 'student' ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div
-                    className={`max-w-[78%] rounded-2xl px-5 py-3.5 shadow-md ${
-                      msg.sender === 'student'
-                        ? 'bg-gradient-to-br from-pink-500 to-rose-500 text-white'
-                        : 'bg-white border border-pink-200 text-gray-900'
-                    }`}
-                  >
-                    {msg.sender === 'counselor' && (
-                      <p className="text-xs font-semibold text-pink-600 mb-1">Counselor</p>
-                    )}
-                    <p className="whitespace-pre-wrap leading-relaxed text-sm">{msg.content}</p>
-                    <p className={`text-xs mt-2 ${msg.sender === 'student' ? 'text-pink-200' : 'text-gray-400'}`}>
-                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </p>
-                  </div>
-                </div>
-              ))}
-              <div ref={messagesEndRef} />
-            </div>
-          )}
-        </div>
-
-        {/* Input Area */}
-        <div className="bg-white/95 backdrop-blur-xl rounded-b-2xl shadow-lg border border-pink-200 border-t-0 p-4">
-          {session.status === 'resolved' ? (
-            <div className="text-center py-3">
-              <p className="text-sm text-gray-600 mb-3">This conversation has been resolved by your counselor.</p>
-              <button
-                onClick={continueResolvedSession}
-                className="inline-flex items-center gap-2 bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 text-white font-semibold py-2.5 px-6 rounded-xl transition-all shadow-md"
-              >
-                <RefreshCw className="w-4 h-4" />
-                Continue Conversation
-              </button>
-            </div>
-          ) : (
-            <div className="flex gap-3">
-              <textarea
-                value={currentMessage}
-                onChange={e => setCurrentMessage(e.target.value)}
-                onKeyDown={handleKeyPress}
-                placeholder="Type your message here..."
-                rows={2}
-                className="flex-1 px-4 py-3 bg-gray-50 border border-pink-200 rounded-xl resize-none focus:outline-none focus:border-pink-400 focus:ring-2 focus:ring-pink-100 focus:bg-white transition-all text-gray-900 placeholder-gray-400 text-sm"
-              />
-              <button
-                onClick={sendMessage}
-                disabled={!currentMessage.trim()}
-                className="bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 disabled:from-gray-300 disabled:to-gray-400 text-white p-3.5 rounded-xl transition-all duration-300 shadow-lg hover:shadow-xl disabled:shadow-none self-end"
-              >
-                <Send className="w-5 h-5" />
-              </button>
-            </div>
-          )}
         </div>
       </div>
     </div>

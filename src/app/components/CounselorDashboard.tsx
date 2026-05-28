@@ -1,9 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import {
   AlertCircle, Clock, CheckCircle, Send, LogOut, Shield,
-  Sparkles, TrendingUp, Archive, Users, ChevronDown, ChevronRight,
-  Heart
+  Sparkles, TrendingUp, Archive, Users, Heart, Search
 } from 'lucide-react';
 import { messageStore, ChatSession, getDisplayName } from '../utils/messageStore';
 import { RiskLevel } from '../utils/crisisDetection';
@@ -18,11 +17,10 @@ export function CounselorDashboard() {
   const [selectedSession, setSelectedSession] = useState<ChatSession | null>(null);
   const [replyMessage, setReplyMessage] = useState('');
   const [activeTab, setActiveTab] = useState<DashboardTab>('active');
-  const [expandedArchiveRisk, setExpandedArchiveRisk] = useState<Record<RiskLevel, boolean>>({
-    high: true,
-    moderate: true,
-    low: false,
-  });
+  const [archiveRiskFilter, setArchiveRiskFilter] = useState<RiskLevel>('high');
+  const [archiveSearch, setArchiveSearch] = useState('');
+  const [archiveDate, setArchiveDate] = useState('');
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   const handleLogout = () => {
     logout();
@@ -32,7 +30,7 @@ export function CounselorDashboard() {
   useEffect(() => {
     const updateSessions = () => {
       const allSessions = messageStore.getAllSessions();
-      const sorted = allSessions.sort((a, b) => {
+      const sorted = [...allSessions].sort((a, b) => {
         const riskOrder: Record<RiskLevel, number> = { high: 3, moderate: 2, low: 1 };
         const riskDiff = riskOrder[b.riskLevel] - riskOrder[a.riskLevel];
         if (riskDiff !== 0) return riskDiff;
@@ -53,9 +51,19 @@ export function CounselorDashboard() {
 
     updateSessions();
     const unsubscribe = messageStore.subscribe(updateSessions);
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSession?.id]);
+
+  useEffect(() => {
+    if (!messagesContainerRef.current) return;
+    messagesContainerRef.current.scrollTo({
+      top: messagesContainerRef.current.scrollHeight,
+      behavior: 'smooth',
+    });
+  }, [selectedSession?.id, selectedSession?.messages.length]);
 
   const sendReply = () => {
     if (!replyMessage.trim() || !selectedSession) return;
@@ -114,15 +122,51 @@ export function CounselorDashboard() {
   const moderateRiskCount = activeSessions.filter(s => s.riskLevel === 'moderate').length;
   const lowRiskCount = activeSessions.filter(s => s.riskLevel === 'low').length;
 
-  const archiveByRisk: Record<RiskLevel, ChatSession[]> = {
-    high: resolvedSessions.filter(s => s.riskLevel === 'high'),
-    moderate: resolvedSessions.filter(s => s.riskLevel === 'moderate'),
-    low: resolvedSessions.filter(s => s.riskLevel === 'low'),
-  };
+  const orderedActiveSessions = [...activeSessions].sort((a, b) => {
+    if (a.riskLevel === 'high' && b.riskLevel !== 'high') return -1;
+    if (b.riskLevel === 'high' && a.riskLevel !== 'high') return 1;
 
-  const toggleArchiveSection = (risk: RiskLevel) => {
-    setExpandedArchiveRisk(prev => ({ ...prev, [risk]: !prev[risk] }));
-  };
+    if (a.riskLevel === 'high' && b.riskLevel === 'high') {
+      return b.lastMessageAt.getTime() - a.lastMessageAt.getTime();
+    }
+
+    const createdDiff = a.createdAt.getTime() - b.createdAt.getTime();
+    if (createdDiff !== 0) return createdDiff;
+
+    return b.lastMessageAt.getTime() - a.lastMessageAt.getTime();
+  });
+
+  const highPrioritySessions = orderedActiveSessions.filter(session => session.riskLevel === 'high');
+  const normalQueueSessions = orderedActiveSessions.filter(session => session.riskLevel !== 'high');
+
+  const archiveSessions = resolvedSessions
+    .filter(session => session.riskLevel === archiveRiskFilter)
+    .filter(session => {
+      const haystack = [
+        getDisplayName(session),
+        session.realStudentName,
+        session.nickname,
+        session.studentEmail,
+        session.messages.map(message => message.content).join(' '),
+      ].join(' ').toLowerCase();
+
+      const searchOk = archiveSearch.trim()
+        ? haystack.includes(archiveSearch.trim().toLowerCase())
+        : true;
+
+      const dateOk = archiveDate
+        ? [session.createdAt, session.resolvedAt ?? session.lastMessageAt].some(date => date.toISOString().slice(0, 10) === archiveDate)
+        : true;
+
+      return searchOk && dateOk;
+    })
+    .sort((a, b) => {
+      const aDate = a.resolvedAt ?? a.lastMessageAt;
+      const bDate = b.resolvedAt ?? b.lastMessageAt;
+      const diff = bDate.getTime() - aDate.getTime();
+      if (diff !== 0) return diff;
+      return b.createdAt.getTime() - a.createdAt.getTime();
+    });
 
   const SessionCard = ({ session, compact = false }: { session: ChatSession; compact?: boolean }) => {
     const colors = getRiskColors(session.riskLevel);
@@ -151,11 +195,14 @@ export function CounselorDashboard() {
                 </span>
               )}
             </div>
-            <p className="text-xs text-gray-500">
-              {new Date(session.lastMessageAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              {' · '}
-              {session.messages.length} messages
-            </p>
+            <div className="space-y-0.5 text-xs text-gray-500">
+              <p>Started {new Date(session.createdAt).toLocaleString()}</p>
+              <p>Last sent {new Date(session.lastMessageAt).toLocaleString()}</p>
+              {session.status === 'resolved' && session.resolvedAt && (
+                <p>Completed {new Date(session.resolvedAt).toLocaleString()}</p>
+              )}
+              <p>{session.messages.length} messages</p>
+            </div>
           </div>
           {session.riskLevel === 'high' && session.status === 'active' && (
             <div className="bg-red-100 p-1.5 rounded-lg flex-shrink-0 ml-2">
@@ -323,7 +370,7 @@ export function CounselorDashboard() {
               {/* Active Sessions */}
               {activeTab === 'active' && (
                 <>
-                  {activeSessions.length === 0 ? (
+                  {orderedActiveSessions.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-full text-center py-12">
                       <div className="w-16 h-16 bg-gradient-to-br from-pink-100 to-rose-100 rounded-full flex items-center justify-center mx-auto mb-3 shadow-md">
                         <CheckCircle className="w-8 h-8 text-pink-500" />
@@ -333,7 +380,20 @@ export function CounselorDashboard() {
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {activeSessions.map(session => (
+                      {highPrioritySessions.map(session => (
+                        <SessionCard key={session.id} session={session} />
+                      ))}
+
+                      {highPrioritySessions.length > 0 && normalQueueSessions.length > 0 && (
+                        <div className="relative py-2">
+                          <div className="absolute left-0 right-0 top-1/2 h-px bg-red-300" />
+                          <div className="relative mx-auto w-fit px-4 py-1 bg-white rounded-full border border-red-200 shadow-sm text-[11px] font-bold uppercase tracking-[0.2em] text-red-600">
+                            Urgent
+                          </div>
+                        </div>
+                      )}
+
+                      {normalQueueSessions.map(session => (
                         <SessionCard key={session.id} session={session} />
                       ))}
                     </div>
@@ -344,56 +404,69 @@ export function CounselorDashboard() {
               {/* Archived Sessions */}
               {activeTab === 'archived' && (
                 <>
-                  {resolvedSessions.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-full text-center py-12">
-                      <div className="w-16 h-16 bg-gradient-to-br from-gray-100 to-gray-200 rounded-full flex items-center justify-center mx-auto mb-3">
-                        <Archive className="w-8 h-8 text-gray-400" />
+                  <div className="space-y-4">
+                    <div className="bg-white/90 border border-pink-200 rounded-2xl p-3 shadow-sm space-y-3">
+                      <div className="flex items-center gap-2">
+                        <Search className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                        <input
+                          type="search"
+                          value={archiveSearch}
+                          onChange={e => setArchiveSearch(e.target.value)}
+                          placeholder="Search name"
+                          className="w-full bg-transparent outline-none text-sm text-gray-800 placeholder:text-gray-400"
+                        />
                       </div>
-                      <p className="text-gray-500 font-medium">No archived sessions</p>
-                      <p className="text-gray-400 text-sm mt-1">Resolved sessions will appear here</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {(['high', 'moderate', 'low'] as RiskLevel[]).map(risk => {
-                        const sessions = archiveByRisk[risk];
-                        if (sessions.length === 0) return null;
-                        const colors = getRiskColors(risk);
-                        const isExpanded = expandedArchiveRisk[risk];
-                        const riskLabel = risk.charAt(0).toUpperCase() + risk.slice(1);
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <input
+                          type="date"
+                          value={archiveDate}
+                          onChange={e => setArchiveDate(e.target.value)}
+                          className="px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm text-gray-700"
+                        />
+                        <div className="flex items-center gap-1 rounded-xl border border-pink-200 bg-pink-50 p-1">
+                          {(['high', 'moderate', 'low'] as RiskLevel[]).map(risk => {
+                            const colors = getRiskColors(risk);
+                            const label = risk === 'high' ? 'High Risk (Resolved)' : risk === 'moderate' ? 'Moderate Risk (Resolved)' : 'Low Risk (Resolved)';
+                            const active = archiveRiskFilter === risk;
 
-                        return (
-                          <div key={risk} className={`border rounded-xl overflow-hidden ${colors.sectionBg}`}>
-                            <button
-                              onClick={() => toggleArchiveSection(risk)}
-                              className={`w-full flex items-center justify-between px-4 py-3 text-left hover:opacity-80 transition-opacity`}
-                            >
-                              <div className="flex items-center gap-2">
-                                <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${colors.dot}`} />
-                                <span className={`text-sm font-bold ${colors.section}`}>
-                                  {riskLabel} Risk (Resolved)
-                                </span>
-                                <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${colors.badge} text-white`}>
-                                  {sessions.length}
-                                </span>
-                              </div>
-                              {isExpanded
-                                ? <ChevronDown className={`w-4 h-4 ${colors.section}`} />
-                                : <ChevronRight className={`w-4 h-4 ${colors.section}`} />
-                              }
-                            </button>
-
-                            {isExpanded && (
-                              <div className="px-3 pb-3 space-y-2">
-                                {sessions.map(session => (
-                                  <SessionCard key={session.id} session={session} compact />
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
+                            return (
+                              <button
+                                key={risk}
+                                onClick={() => setArchiveRiskFilter(risk)}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${active ? `${colors.badge} text-white shadow-md` : 'text-gray-600 hover:bg-white'}`}
+                              >
+                                {label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
                     </div>
-                  )}
+
+                    {resolvedSessions.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center h-full text-center py-12">
+                        <div className="w-16 h-16 bg-gradient-to-br from-gray-100 to-gray-200 rounded-full flex items-center justify-center mx-auto mb-3">
+                          <Archive className="w-8 h-8 text-gray-400" />
+                        </div>
+                        <p className="text-gray-500 font-medium">No archived sessions</p>
+                        <p className="text-gray-400 text-sm mt-1">Resolved sessions will appear here</p>
+                      </div>
+                    ) : archiveSessions.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center h-full text-center py-12">
+                        <div className="w-16 h-16 bg-gradient-to-br from-gray-100 to-gray-200 rounded-full flex items-center justify-center mx-auto mb-3">
+                          <Archive className="w-8 h-8 text-gray-400" />
+                        </div>
+                        <p className="text-gray-500 font-medium">No matching archived sessions</p>
+                        <p className="text-gray-400 text-sm mt-1">Try a different name, date, or risk category</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {archiveSessions.map(session => (
+                          <SessionCard key={session.id} session={session} compact />
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </>
               )}
             </div>
@@ -434,6 +507,16 @@ export function CounselorDashboard() {
                         <Clock className="w-3.5 h-3.5" />
                         Started {new Date(selectedSession.createdAt).toLocaleString()}
                       </p>
+                      <p className="text-xs text-gray-500 flex items-center gap-1.5 mt-1">
+                        <Clock className="w-3.5 h-3.5" />
+                        Last sent {new Date(selectedSession.lastMessageAt).toLocaleString()}
+                      </p>
+                      {selectedSession.status === 'resolved' && selectedSession.resolvedAt && (
+                        <p className="text-xs text-gray-500 flex items-center gap-1.5 mt-1">
+                          <CheckCircle className="w-3.5 h-3.5" />
+                          Completed {new Date(selectedSession.resolvedAt).toLocaleString()}
+                        </p>
+                      )}
                     </div>
                     {selectedSession.status === 'active' && (
                       <button
@@ -447,7 +530,7 @@ export function CounselorDashboard() {
                 </div>
 
                 {/* Messages */}
-                <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5 bg-gradient-to-b from-white to-pink-50/20">
+                <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-6 py-5 space-y-5 bg-gradient-to-b from-white to-pink-50/20">
                   {selectedSession.messages.length === 0 && (
                     <div className="flex items-center justify-center h-full">
                       <p className="text-gray-400 text-sm">No messages yet in this session.</p>

@@ -1,12 +1,14 @@
 import { RiskLevel } from './crisisDetection';
 
-const NICKNAME_ADJECTIVES = ['Gentle', 'Calm', 'Brave', 'Quiet', 'Warm', 'Kind', 'Soft', 'Clear', 'Bright', 'Still'];
-const NICKNAME_NOUNS = ['River', 'Breeze', 'Cloud', 'Star', 'Moon', 'Wave', 'Petal', 'Dawn', 'Leaf', 'Rain'];
+export function generateNickname(existingNicknames?: Set<string>): string {
+  let nickname = '';
 
-export function generateNickname(): string {
-  const adj = NICKNAME_ADJECTIVES[Math.floor(Math.random() * NICKNAME_ADJECTIVES.length)];
-  const noun = NICKNAME_NOUNS[Math.floor(Math.random() * NICKNAME_NOUNS.length)];
-  return `${adj} ${noun}`;
+  do {
+    const id = Math.floor(10000 + Math.random() * 90000);
+    nickname = `Student${id}`;
+  } while (existingNicknames?.has(nickname));
+
+  return nickname;
 }
 
 export function getDisplayName(session: ChatSession): string {
@@ -266,10 +268,36 @@ class MessageStore {
     return Array.from(this.sessions.values()).filter(s => s.status === 'resolved');
   }
 
-  createSession(studentEmail: string, realStudentName: string, isAnonymous: boolean): ChatSession {
+  createSession(studentEmail: string, realStudentName: string, isAnonymous: boolean, nickname?: string): ChatSession {
+    const existingNicknames = new Set(Array.from(this.sessions.values()).map(session => session.nickname));
+    const requestedNickname = nickname?.trim();
+    const finalNickname = isAnonymous
+      ? (requestedNickname || generateNickname(existingNicknames))
+      : realStudentName;
+
+    const uniqueNickname = (() => {
+      if (!isAnonymous) return finalNickname;
+
+      if (!existingNicknames.has(finalNickname)) {
+        return finalNickname;
+      }
+
+      if (requestedNickname) {
+        let suffix = 2;
+        let candidate = `${finalNickname} ${suffix}`;
+        while (existingNicknames.has(candidate)) {
+          suffix += 1;
+          candidate = `${finalNickname} ${suffix}`;
+        }
+        return candidate;
+      }
+
+      return generateNickname(existingNicknames);
+    })();
+
     const session: ChatSession = {
       id: `session-${Date.now()}`,
-      nickname: generateNickname(),
+      nickname: uniqueNickname,
       realStudentName,
       studentEmail: studentEmail.toLowerCase(),
       isAnonymous,

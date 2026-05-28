@@ -1,0 +1,29 @@
+.scrollbar-fade {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.scrollbar-fade::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.scrollbar-fade--active {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(236, 72, 153, 0.45) transparent;
+}
+
+.scrollbar-fade--active::-webkit-scrollbar {
+  width: 10px;
+}
+
+.scrollbar-fade--active::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-fade--active::-webkit-scrollbar-thumb {
+  background: rgba(236, 72, 153, 0.45);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
