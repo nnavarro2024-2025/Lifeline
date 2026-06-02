@@ -24,7 +24,7 @@ npm run api
 Terminal B (Frontend):
 
 ```bash
-npm run dev
+npm run dev -- --host 0.0.0.0 --port 5173
 ```
 
 If you run only the frontend, login/register/chat will fail.
@@ -41,46 +41,7 @@ npm install
 
 3. Import schema from [db/lifeline_schema.sql](db/lifeline_schema.sql).
 
-4. Create server env file.
 
-- Copy [server/.env.example](server/.env.example) to server/.env.
-
-5. Create frontend env file at project root named .env.
-
-```env
-VITE_GOOGLE_CLIENT_ID=your-google-oauth-client-id.apps.googleusercontent.com
-```
-
-6. (Only for older databases) run migration:
-
-```bash
-node server/migrate_first_last_name.js
-```
-
-## Required Environment Variables
-
-Server (server/.env):
-
-- API_PORT=3001
-- FRONTEND_ORIGIN=http://localhost:5173
-- GOOGLE_CLIENT_ID=your-google-oauth-client-id.apps.googleusercontent.com
-- DB_HOST=127.0.0.1
-- DB_PORT=3306
-- DB_USER=root
-- DB_PASSWORD=
-- DB_NAME=lifeline_db
-
-Frontend (project root .env):
-
-- VITE_GOOGLE_CLIENT_ID=your-google-oauth-client-id.apps.googleusercontent.com
-- VITE_API_BASE_URL (optional)
-
-API base URL behavior:
-
-- If VITE_API_BASE_URL is set, frontend uses it.
-- If not set, frontend auto-uses current browser host on port 3001.
-- Example: http://localhost:5173 -> http://localhost:3001
-- Example: http://10.0.0.108:5173 -> http://10.0.0.108:3001
 
 ## Phone / LAN Testing
 
