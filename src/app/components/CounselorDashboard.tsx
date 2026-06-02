@@ -299,8 +299,8 @@ export function CounselorDashboard() {
                 <p className="text-xs font-semibold text-yellow-600 uppercase tracking-wide">Moderate</p>
                 {moderateRiskCount > 0 && (
                   <div className="flex items-center gap-1 mt-0.5">
-                    <Clock className="w-3 h-3 text-yellow-500" />
-                    <span className="text-xs text-yellow-500">Monitor</span>
+                    {/* <Clock className="w-3 h-3 text-yellow-500" />
+                    <span className="text-xs text-yellow-500">Monitor</span> */}
                   </div>
                 )}
               </div>
@@ -315,8 +315,8 @@ export function CounselorDashboard() {
                 <p className="text-xs font-semibold text-green-600 uppercase tracking-wide">Low Risk</p>
                 {lowRiskCount > 0 && (
                   <div className="flex items-center gap-1 mt-0.5">
-                    <CheckCircle className="w-3 h-3 text-green-500" />
-                    <span className="text-xs text-green-500">Standard</span>
+                    {/* <CheckCircle className="w-3 h-3 text-green-500" />
+                    <span className="text-xs text-green-500">Standard</span> */}
                   </div>
                 )}
               </div>
