@@ -4,7 +4,8 @@ import { Heart, Eye, EyeOff, Mail, Lock, User, AlertCircle, CheckCircle } from '
 import { useAuth } from '../context/AuthContext';
 
 export function Register() {
-  const [name, setName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -14,20 +15,25 @@ export function Register() {
   const navigate = useNavigate();
   const { register } = useAuth();
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    if (!name.trim()) {
-      setError('Please enter your full name.');
+    if (!firstName.trim()) {
+      setError('Please enter your first name.');
+      return;
+    }
+    if (!lastName.trim()) {
+      setError('Please enter your last name.');
       return;
     }
     if (!email.trim()) {
       setError('Please enter your UIC email address.');
       return;
     }
-    if (!email.toLowerCase().endsWith('@uic.edu')) {
-      setError('Please use your UIC email address (@uic.edu).');
+    const lowerEmail = email.toLowerCase();
+    if (!lowerEmail.endsWith('@uic.edu.ph')) {
+      setError('Please use your UIC email address (@uic.edu.ph).');
       return;
     }
     if (password.length < 6) {
@@ -39,7 +45,7 @@ export function Register() {
       return;
     }
 
-    const result = register(name, email, password);
+    const result = await register(firstName, lastName, email, password);
     if (!result.success) {
       setError(result.error || 'Registration failed. Please try again.');
       return;
@@ -92,18 +98,34 @@ export function Register() {
           )}
 
           <form onSubmit={handleRegister} className="space-y-4">
-            {/* Full Name */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Full Name</label>
-              <div className="relative">
-                <User className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  type="text"
-                  value={name}
-                  onChange={e => { setName(e.target.value); setError(''); }}
-                  placeholder="Juan Dela Cruz"
-                  className="w-full pl-11 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:border-pink-400 focus:ring-2 focus:ring-pink-100 focus:bg-white transition-all text-gray-900 placeholder-gray-400"
-                />
+            {/* First and Last Name */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">First Name</label>
+                <div className="relative">
+                  <User className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="text"
+                    value={firstName}
+                    onChange={e => { setFirstName(e.target.value); setError(''); }}
+                    placeholder="Juan"
+                    className="w-full pl-11 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:border-pink-400 focus:ring-2 focus:ring-pink-100 focus:bg-white transition-all text-gray-900 placeholder-gray-400"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Last Name</label>
+                <div className="relative">
+                  <User className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="text"
+                    value={lastName}
+                    onChange={e => { setLastName(e.target.value); setError(''); }}
+                    placeholder="Dela Cruz"
+                    className="w-full pl-11 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:border-pink-400 focus:ring-2 focus:ring-pink-100 focus:bg-white transition-all text-gray-900 placeholder-gray-400"
+                  />
+                </div>
               </div>
             </div>
 
@@ -116,14 +138,14 @@ export function Register() {
                   type="email"
                   value={email}
                   onChange={e => { setEmail(e.target.value); setError(''); }}
-                  placeholder="your.name@uic.edu"
+                  placeholder="UIC_email_Account@uic.edu.ph"
                   className="w-full pl-11 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:border-pink-400 focus:ring-2 focus:ring-pink-100 focus:bg-white transition-all text-gray-900 placeholder-gray-400"
                 />
               </div>
-              {email && !email.endsWith('@uic.edu') && (
-                <p className="text-xs text-red-500 mt-1">Must be a @uic.edu address</p>
+              {email && !email.toLowerCase().endsWith('@uic.edu.ph') && (
+                <p className="text-xs text-red-500 mt-1">Must be a @uic.edu.ph address</p>
               )}
-              {email && email.endsWith('@uic.edu') && (
+              {email && email.toLowerCase().endsWith('@uic.edu.ph') && (
                 <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
                   <CheckCircle className="w-3 h-3" /> Valid UIC email
                 </p>
@@ -211,7 +233,7 @@ export function Register() {
         <div className="mt-4 p-4 bg-white/60 backdrop-blur-sm border border-pink-100 rounded-2xl shadow-sm">
           <p className="text-xs text-gray-500 text-center leading-relaxed">
             Counselor accounts are created by administrators only.
-            Student accounts can be created here with any @uic.edu email.
+            Student accounts can be created here with any @uic.edu.ph email.
           </p>
         </div>
       </div>

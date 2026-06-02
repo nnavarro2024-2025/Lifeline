@@ -65,14 +65,17 @@ export function CounselorDashboard() {
     });
   }, [selectedSession?.id, selectedSession?.messages.length]);
 
-  const sendReply = () => {
+  const sendReply = async () => {
     if (!replyMessage.trim() || !selectedSession) return;
-    messageStore.addMessage(selectedSession.id, replyMessage, 'counselor', 'low');
-    setReplyMessage('');
+    const updatedSession = await messageStore.addMessage(selectedSession.id, replyMessage, 'counselor', 'low');
+    if (updatedSession) {
+      setSelectedSession(updatedSession);
+      setReplyMessage('');
+    }
   };
 
-  const resolveSession = (sessionId: string) => {
-    messageStore.updateSessionStatus(sessionId, 'resolved');
+  const resolveSession = async (sessionId: string) => {
+    await messageStore.updateSessionStatus(sessionId, 'resolved');
     if (selectedSession?.id === sessionId) {
       setSelectedSession(null);
     }

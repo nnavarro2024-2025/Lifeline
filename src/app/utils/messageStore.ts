@@ -1,4 +1,5 @@
 import { RiskLevel } from './crisisDetection';
+import { api, ApiChatSession } from './api';
 
 export function generateNickname(existingNicknames?: Set<string>): string {
   let nickname = '';
@@ -44,196 +45,83 @@ export interface ChatSession {
 class MessageStore {
   private sessions: Map<string, ChatSession> = new Map();
   private listeners: Set<() => void> = new Set();
+  private pollTimer: number | null = null;
+  private isSyncing = false;
+  private readonly pollIntervalMs = 2000;
 
   constructor() {
-    this.initializeMockData();
+    void this.refreshSessions();
   }
 
-  private initializeMockData() {
-    const now = new Date();
+  private parseSession(session: ApiChatSession): ChatSession {
+    return {
+      id: session.id,
+      nickname: session.nickname,
+      realStudentName: session.realStudentName,
+      studentEmail: session.studentEmail,
+      isAnonymous: Boolean(session.isAnonymous),
+      revealedRealName: Boolean(session.revealedRealName),
+      messages: session.messages.map(message => ({
+        id: message.id,
+        sessionId: message.sessionId,
+        content: message.content,
+        sender: message.sender,
+        timestamp: new Date(message.timestamp),
+      })),
+      riskLevel: session.riskLevel,
+      status: session.status,
+      createdAt: new Date(session.createdAt),
+      lastMessageAt: new Date(session.lastMessageAt),
+      resolvedAt: session.resolvedAt ? new Date(session.resolvedAt) : undefined,
+    };
+  }
 
-    const mockSessions: ChatSession[] = [
-      {
-        id: 'session-001',
-        nickname: 'Quiet Moon',
-        realStudentName: 'Unknown Student',
-        studentEmail: 'mock1@uic.edu',
-        isAnonymous: true,
-        revealedRealName: false,
-        riskLevel: 'high',
-        status: 'active',
-        createdAt: new Date(now.getTime() - 300000),
-        lastMessageAt: new Date(now.getTime() - 60000),
-        messages: [
-          {
-            id: 'msg-1',
-            sessionId: 'session-001',
-            content: "I don't know what to do anymore. I feel like there's no reason to live.",
-            sender: 'student',
-            timestamp: new Date(now.getTime() - 300000),
-          },
-          {
-            id: 'msg-2',
-            sessionId: 'session-001',
-            content: "Everything feels hopeless. I'm thinking about ending it all.",
-            sender: 'student',
-            timestamp: new Date(now.getTime() - 60000),
-          },
-        ],
-      },
-      {
-        id: 'session-002',
-        nickname: 'Brave River',
-        realStudentName: 'Maria Santos',
-        studentEmail: 'maria.santos@uic.edu',
-        isAnonymous: false,
-        revealedRealName: false,
-        riskLevel: 'moderate',
-        status: 'active',
-        createdAt: new Date(now.getTime() - 600000),
-        lastMessageAt: new Date(now.getTime() - 120000),
-        messages: [
-          {
-            id: 'msg-3',
-            sessionId: 'session-002',
-            content: 'Sobrang stressed na ako sa school. Hindi ko na kaya.',
-            sender: 'student',
-            timestamp: new Date(now.getTime() - 600000),
-          },
-          {
-            id: 'msg-4',
-            sessionId: 'session-002',
-            content: 'Feeling ko worthless na ako. Ang hirap ng buhay.',
-            sender: 'student',
-            timestamp: new Date(now.getTime() - 120000),
-          },
-        ],
-      },
-      {
-        id: 'session-003',
-        nickname: 'Calm Breeze',
-        realStudentName: 'Unknown Student',
-        studentEmail: 'mock2@uic.edu',
-        isAnonymous: true,
-        revealedRealName: false,
-        riskLevel: 'low',
-        status: 'active',
-        createdAt: new Date(now.getTime() - 900000),
-        lastMessageAt: new Date(now.getTime() - 180000),
-        messages: [
-          {
-            id: 'msg-5',
-            sessionId: 'session-003',
-            content: "I'm feeling a bit overwhelmed with my assignments.",
-            sender: 'student',
-            timestamp: new Date(now.getTime() - 900000),
-          },
-        ],
-      },
-      {
-        id: 'session-004',
-        nickname: 'Gentle Wave',
-        realStudentName: 'Juan Cruz',
-        studentEmail: 'juan.cruz@uic.edu',
-        isAnonymous: false,
-        revealedRealName: false,
-        riskLevel: 'high',
-        status: 'resolved',
-        createdAt: new Date(now.getTime() - 86400000),
-        lastMessageAt: new Date(now.getTime() - 82000000),
-        resolvedAt: new Date(now.getTime() - 80000000),
-        messages: [
-          {
-            id: 'msg-6',
-            sessionId: 'session-004',
-            content: "I was struggling with thoughts of hurting myself but I reached out.",
-            sender: 'student',
-            timestamp: new Date(now.getTime() - 86400000),
-          },
-          {
-            id: 'msg-7',
-            sessionId: 'session-004',
-            content: "Thank you for reaching out. I'm glad you did. Let's talk through this together.",
-            sender: 'counselor',
-            timestamp: new Date(now.getTime() - 83000000),
-          },
-          {
-            id: 'msg-8',
-            sessionId: 'session-004',
-            content: "I feel better now. Thank you so much.",
-            sender: 'student',
-            timestamp: new Date(now.getTime() - 82000000),
-          },
-        ],
-      },
-      {
-        id: 'session-005',
-        nickname: 'Soft Star',
-        realStudentName: 'Ana Reyes',
-        studentEmail: 'ana.reyes@uic.edu',
-        isAnonymous: false,
-        revealedRealName: false,
-        riskLevel: 'moderate',
-        status: 'resolved',
-        createdAt: new Date(now.getTime() - 172800000),
-        lastMessageAt: new Date(now.getTime() - 170000000),
-        resolvedAt: new Date(now.getTime() - 168000000),
-        messages: [
-          {
-            id: 'msg-9',
-            sessionId: 'session-005',
-            content: "I'm having a really hard time with anxiety lately.",
-            sender: 'student',
-            timestamp: new Date(now.getTime() - 172800000),
-          },
-          {
-            id: 'msg-10',
-            sessionId: 'session-005',
-            content: "I hear you. Anxiety can feel overwhelming. Let's talk about what's been happening.",
-            sender: 'counselor',
-            timestamp: new Date(now.getTime() - 171000000),
-          },
-        ],
-      },
-      {
-        id: 'session-006',
-        nickname: 'Clear Dawn',
-        realStudentName: 'Unknown Student',
-        studentEmail: 'mock3@uic.edu',
-        isAnonymous: true,
-        revealedRealName: false,
-        riskLevel: 'low',
-        status: 'resolved',
-        createdAt: new Date(now.getTime() - 259200000),
-        lastMessageAt: new Date(now.getTime() - 256000000),
-        resolvedAt: new Date(now.getTime() - 254000000),
-        messages: [
-          {
-            id: 'msg-11',
-            sessionId: 'session-006',
-            content: "Just wanted to talk to someone. I've been feeling lonely.",
-            sender: 'student',
-            timestamp: new Date(now.getTime() - 259200000),
-          },
-          {
-            id: 'msg-12',
-            sessionId: 'session-006',
-            content: "You did the right thing by reaching out. I'm here to listen.",
-            sender: 'counselor',
-            timestamp: new Date(now.getTime() - 258000000),
-          },
-        ],
-      },
-    ];
+  private setSessionsFromApi(sessions: ApiChatSession[]) {
+    this.sessions.clear();
+    for (const session of sessions) {
+      const parsed = this.parseSession(session);
+      this.sessions.set(parsed.id, parsed);
+    }
+  }
 
-    for (const session of mockSessions) {
-      this.sessions.set(session.id, session);
+  private async refreshSessions() {
+    if (this.isSyncing) return;
+    this.isSyncing = true;
+    try {
+      const response = await api.listSessions('all');
+      this.setSessionsFromApi(response.sessions);
+      this.notify();
+    } catch {
+      // Keep last known in-memory snapshot if API temporarily fails.
+    } finally {
+      this.isSyncing = false;
+    }
+  }
+
+  private startPolling() {
+    if (this.pollTimer !== null) return;
+
+    void this.refreshSessions();
+    this.pollTimer = window.setInterval(() => {
+      void this.refreshSessions();
+    }, this.pollIntervalMs);
+  }
+
+  private stopPollingIfIdle() {
+    if (this.listeners.size > 0) return;
+    if (this.pollTimer !== null) {
+      window.clearInterval(this.pollTimer);
+      this.pollTimer = null;
     }
   }
 
   subscribe(listener: () => void) {
     this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
+    this.startPolling();
+    return () => {
+      this.listeners.delete(listener);
+      this.stopPollingIfIdle();
+    };
   }
 
   private notify() {
@@ -268,107 +156,58 @@ class MessageStore {
     return Array.from(this.sessions.values()).filter(s => s.status === 'resolved');
   }
 
-  createSession(studentEmail: string, realStudentName: string, isAnonymous: boolean, nickname?: string): ChatSession {
-    const existingNicknames = new Set(Array.from(this.sessions.values()).map(session => session.nickname));
-    const requestedNickname = nickname?.trim();
-    const finalNickname = isAnonymous
-      ? (requestedNickname || generateNickname(existingNicknames))
-      : realStudentName;
-
-    const uniqueNickname = (() => {
-      if (!isAnonymous) return finalNickname;
-
-      if (!existingNicknames.has(finalNickname)) {
-        return finalNickname;
-      }
-
-      if (requestedNickname) {
-        let suffix = 2;
-        let candidate = `${finalNickname} ${suffix}`;
-        while (existingNicknames.has(candidate)) {
-          suffix += 1;
-          candidate = `${finalNickname} ${suffix}`;
-        }
-        return candidate;
-      }
-
-      return generateNickname(existingNicknames);
-    })();
-
-    const session: ChatSession = {
-      id: `session-${Date.now()}`,
-      nickname: uniqueNickname,
+  async createSession(studentEmail: string, realStudentName: string, isAnonymous: boolean, nickname?: string): Promise<ChatSession> {
+    const response = await api.createSession({
+      studentEmail,
       realStudentName,
-      studentEmail: studentEmail.toLowerCase(),
       isAnonymous,
-      revealedRealName: false,
-      messages: [],
-      riskLevel: 'low',
-      status: 'active',
-      createdAt: new Date(),
-      lastMessageAt: new Date(),
-    };
-    this.sessions.set(session.id, session);
+      nickname,
+    });
+    const parsed = this.parseSession(response.session);
+    this.sessions.set(parsed.id, parsed);
     this.notify();
-    return session;
+    return parsed;
   }
 
-  addMessage(sessionId: string, content: string, sender: 'student' | 'counselor', riskLevel: RiskLevel) {
-    const session = this.sessions.get(sessionId);
-    if (!session) return;
-
-    const message: Message = {
-      id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+  async addMessage(sessionId: string, content: string, sender: 'student' | 'counselor', riskLevel: RiskLevel): Promise<ChatSession | undefined> {
+    const response = await api.addMessage({
       sessionId,
       content,
       sender,
-      timestamp: new Date(),
-    };
-
-    session.messages.push(message);
-    session.lastMessageAt = new Date();
-
-    if (sender === 'student') {
-      const riskLevels: Record<RiskLevel, number> = { low: 1, moderate: 2, high: 3 };
-      if (riskLevels[riskLevel] > riskLevels[session.riskLevel]) {
-        session.riskLevel = riskLevel;
-      }
-    }
-
+      riskLevel,
+    });
+    const parsed = this.parseSession(response.session);
+    this.sessions.set(parsed.id, parsed);
     this.notify();
+    return parsed;
   }
 
-  updateSessionStatus(sessionId: string, status: 'active' | 'resolved') {
-    const session = this.sessions.get(sessionId);
-    if (session) {
-      session.status = status;
-      if (status === 'resolved') {
-        session.resolvedAt = new Date();
-      }
-      this.notify();
-    }
+  async updateSessionStatus(sessionId: string, status: 'active' | 'resolved'): Promise<ChatSession | undefined> {
+    const response = await api.updateSessionStatus(sessionId, status);
+    const parsed = this.parseSession(response.session);
+    this.sessions.set(parsed.id, parsed);
+    this.notify();
+    return parsed;
   }
 
-  reactivateSession(sessionId: string): ChatSession | undefined {
-    const session = this.sessions.get(sessionId);
-    if (session && session.status === 'resolved') {
-      session.status = 'active';
-      session.riskLevel = 'low';
-      session.resolvedAt = undefined;
-      this.notify();
-    }
-    return session;
+  async reactivateSession(sessionId: string): Promise<ChatSession | undefined> {
+    const response = await api.reactivateSession(sessionId);
+    const parsed = this.parseSession(response.session);
+    this.sessions.set(parsed.id, parsed);
+    this.notify();
+    return parsed;
   }
 
-  toggleRealName(sessionId: string) {
-    const session = this.sessions.get(sessionId);
-    if (session) {
-      session.revealedRealName = !session.revealedRealName;
-      this.notify();
-    }
+  async toggleRealName(sessionId: string): Promise<ChatSession | undefined> {
+    const response = await api.toggleRealName(sessionId);
+    const parsed = this.parseSession(response.session);
+    this.sessions.set(parsed.id, parsed);
+    this.notify();
+    return parsed;
   }
 
-  deleteSession(sessionId: string) {
+  async deleteSession(sessionId: string) {
+    await api.deleteSession(sessionId);
     this.sessions.delete(sessionId);
     this.notify();
   }

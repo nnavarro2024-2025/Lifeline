@@ -8,6 +8,7 @@ import {
 import { analyzeMessage } from '../utils/crisisDetection';
 import { messageStore, ChatSession, getDisplayName } from '../utils/messageStore';
 import { useAuth } from '../context/AuthContext';
+import { useIsMobile } from './ui/use-mobile';
 
 type ChatState = 'setup' | 'resolved' | 'chatting';
 
@@ -30,9 +31,16 @@ const crisisHotlines = [
   },
 ];
 
+const MOBILE_HELPLINE_DISMISS_KEY_PREFIX = 'lifeline-mobile-helpline-dismissed-v1';
+
+function getMobileHelplineDismissKey(email?: string) {
+  return email ? `${MOBILE_HELPLINE_DISMISS_KEY_PREFIX}:${email.toLowerCase()}` : null;
+}
+
 export function StudentChat() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
 
   const [chatState, setChatState] = useState<ChatState>('setup');
   const [session, setSession] = useState<ChatSession | null>(null);
@@ -42,12 +50,14 @@ export function StudentChat() {
   const [anonymousClue, setAnonymousClue] = useState('');
   const [currentMessage, setCurrentMessage] = useState('');
   const [isScrolling, setIsScrolling] = useState(false);
+  const [showHelplineModal, setShowHelplineModal] = useState(false);
 
   // Chat menu state
   const [showMenu, setShowMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<number | null>(null);
 
   const handleLogout = () => {
@@ -55,11 +65,22 @@ export function StudentChat() {
     navigate('/');
   };
 
+  const openHelplineModal = () => {
+    setShowHelplineModal(true);
+  };
+
+  const closeHelplineModal = () => {
+    setShowHelplineModal(false);
+    const dismissKey = getMobileHelplineDismissKey(user?.email);
+    if (isMobile && dismissKey) {
+      window.localStorage.setItem(dismissKey, 'true');
+    }
+  };
+
   // Auto-scroll to bottom on new messages
   useEffect(() => {
-    messagesContainerRef.current?.scrollTo({
-      top: messagesContainerRef.current.scrollHeight,
-      behavior: 'smooth',
+    window.requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
     });
   }, [session?.messages.length]);
 
@@ -70,6 +91,19 @@ export function StudentChat() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!isMobile) {
+      setShowHelplineModal(false);
+      return;
+    }
+
+    const dismissKey = getMobileHelplineDismissKey(user?.email);
+    const hasDismissed = dismissKey ? window.localStorage.getItem(dismissKey) === 'true' : false;
+    if (!hasDismissed) {
+      setShowHelplineModal(true);
+    }
+  }, [isMobile, user?.email]);
 
   // Determine initial state based on student's sessions
   useEffect(() => {
@@ -113,22 +147,26 @@ export function StudentChat() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const startNewChat = () => {
+  const startNewChat = async () => {
     if (!user?.email) return;
     const customNickname = anonymousMode === 'clue' ? anonymousClue.trim() : undefined;
-    const newSession = messageStore.createSession(
-      user.email,
-      user.name,
-      isAnonymous,
-      customNickname
-    );
-    setSession(newSession);
-    setChatState('chatting');
+    try {
+      const newSession = await messageStore.createSession(
+        user.email,
+        user.name,
+        isAnonymous,
+        customNickname
+      );
+      setSession(newSession);
+      setChatState('chatting');
+    } catch {
+      // Keep user on setup if API request fails.
+    }
   };
 
-  const continueResolvedSession = () => {
+  const continueResolvedSession = async () => {
     if (!lastResolvedSession) return;
-    const reactivated = messageStore.reactivateSession(lastResolvedSession.id);
+    const reactivated = await messageStore.reactivateSession(lastResolvedSession.id);
     if (reactivated) {
       setSession(reactivated);
       setChatState('chatting');
@@ -140,15 +178,15 @@ export function StudentChat() {
     setChatState('setup');
   };
 
-  const sendMessage = () => {
+  const sendMessage = async () => {
     if (!currentMessage.trim() || !session) return;
 
     const analysis = analyzeMessage(currentMessage, session.messages.length);
-    messageStore.addMessage(session.id, currentMessage, 'student', analysis.riskLevel);
-
-    const updated = messageStore.getSession(session.id);
-    if (updated) setSession(updated);
-    setCurrentMessage('');
+    const updated = await messageStore.addMessage(session.id, currentMessage, 'student', analysis.riskLevel);
+    if (updated) {
+      setSession(updated);
+      setCurrentMessage('');
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -158,10 +196,9 @@ export function StudentChat() {
     }
   };
 
-  const handleToggleRealName = () => {
+  const handleToggleRealName = async () => {
     if (!session) return;
-    messageStore.toggleRealName(session.id);
-    const updated = messageStore.getSession(session.id);
+    const updated = await messageStore.toggleRealName(session.id);
     if (updated) setSession(updated);
     setShowMenu(false);
   };
@@ -171,9 +208,9 @@ export function StudentChat() {
     setShowMenu(false);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!session) return;
-    messageStore.deleteSession(session.id);
+    await messageStore.deleteSession(session.id);
     setSession(null);
     setLastResolvedSession(null);
     setChatState('setup');
@@ -399,8 +436,8 @@ export function StudentChat() {
   const displayName = getDisplayName(session);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-50 via-rose-50 to-fuchsia-50 relative overflow-hidden">
-      <div className="max-w-7xl mx-auto h-screen flex flex-col lg:flex-row px-4 py-4 relative z-10 isolate gap-2">
+    <div className="min-h-screen h-[100dvh] bg-gradient-to-br from-pink-50 via-rose-50 to-fuchsia-50 relative overflow-hidden">
+      <div className="max-w-7xl mx-auto h-[100dvh] flex flex-col lg:flex-row px-4 py-4 relative z-10 isolate gap-2 overflow-hidden">
 
         {/* Support sidebar */}
         <div className="hidden lg:block w-72 shrink-0">
@@ -435,9 +472,9 @@ export function StudentChat() {
           </div>
         </div>
 
-        <div className="flex-1 min-w-0 flex flex-col gap-0 relative z-10">
+        <div className="flex-1 min-w-0 flex flex-col gap-0 relative z-10 overflow-hidden">
           {/* Chat Header */}
-          <div className="bg-white/95 backdrop-blur-xl rounded-t-2xl shadow-lg border border-pink-200 border-b-0 px-5 py-4 flex items-center gap-4 overflow-visible relative z-30">
+          <div className="bg-white/95 backdrop-blur-xl rounded-t-2xl shadow-lg border border-pink-200 border-b-0 px-4 sm:px-5 py-4 flex items-center gap-4 overflow-visible relative z-30 shrink-0">
             <div className="bg-gradient-to-br from-pink-400 to-rose-500 p-2.5 rounded-xl shadow-md flex-shrink-0">
               {session.isAnonymous && !session.revealedRealName ? (
                 <UserX className="w-5 h-5 text-white" />
@@ -480,6 +517,26 @@ export function StudentChat() {
 
               {showMenu && (
                 <div className="absolute right-0 top-full mt-2 bg-white rounded-2xl shadow-2xl border border-gray-100 w-64 max-w-[calc(100vw-2rem)] z-[70] overflow-hidden py-1">
+                  {isMobile && (
+                    <button
+                      onClick={() => {
+                        openHelplineModal();
+                        setShowMenu(false);
+                      }}
+                      className="w-full flex items-start gap-3 px-4 py-3 hover:bg-pink-50 transition-colors text-left"
+                    >
+                      <PhoneCall className="w-4 h-4 text-pink-500 flex-shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-pink-700 leading-5">Helpline</p>
+                        <p className="text-xs text-pink-500 mt-0.5 leading-4">
+                          Open crisis support info for mobile
+                        </p>
+                      </div>
+                    </button>
+                  )}
+
+                  {isMobile && <div className="mx-4 my-1 border-t border-gray-100" />}
+
                   {session.isAnonymous && (
                     <button
                       onClick={handleToggleRealName}
@@ -527,6 +584,74 @@ export function StudentChat() {
             </div>
           </div>
 
+          {isMobile && showHelplineModal && (
+            <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/45 px-4 py-4">
+              <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl border border-pink-100 overflow-hidden max-h-[85vh] flex flex-col">
+                <div className="px-5 py-4 bg-gradient-to-r from-pink-500 to-rose-500 text-white">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="bg-white/20 rounded-2xl p-2.5 flex-shrink-0">
+                        <PhoneCall className="w-5 h-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <h2 className="text-lg font-bold leading-tight">Helpline</h2>
+                        <p className="text-xs text-pink-100 leading-4">
+                          Crisis support contacts for mobile users
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={closeHelplineModal}
+                      className="shrink-0 rounded-xl bg-white/15 hover:bg-white/25 px-3 py-2 text-sm font-semibold transition-colors"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-5 space-y-3 overflow-y-auto text-sm leading-relaxed text-gray-700">
+                  <p>
+                    If you need immediate support, you can also reach out — these helplines are available 24/7. You're not alone.
+                  </p>
+                  <p>
+                    <strong>Davao City Health Office 24/7:</strong><br />
+                    0927 604 5797, <br />
+                    0939 340 5675, <br />
+                    0961 526 2861.
+                  </p>
+                  <p>
+                    <strong>National Center for Mental Health:</strong> 0917 899 8727 (USAP) or <br />
+                    989-8727 (USAP).
+                  </p>
+                  <p>
+                    <strong>In Touch Community Services Crisis Lines:</strong> 0917 800 1123, <br />
+                    0922 893 8944, <br />
+                    893-7603.
+                  </p>
+                  <p>
+                    <strong>Tawag Paglaum - Centro Bisaya:</strong> 0966-467-9626, <br />
+                    <a href="https://www.facebook.com/profile.php?id=100068862624004" target="_blank" rel="noopener noreferrer" className="text-blue-600 font-semibold underline break-all">
+                      facebook.com
+                    </a>
+                  </p>
+                  <p>
+                    <strong>NCMH Crisis Hotline:</strong> tel:1800-1888-1553, <br />
+                    <a href="https://www.facebook.com/ncmhcrisishotline?mibextid=LQQJ4d" target="_blank" rel="noopener noreferrer" className="text-blue-600 font-semibold underline break-all">
+                      facebook.com
+                    </a>
+                  </p>
+
+                  <button
+                    onClick={closeHelplineModal}
+                    className="w-full bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 text-white font-semibold py-3.5 px-5 rounded-2xl transition-all shadow-lg"
+                  >
+                    Close Helpline
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Delete Confirmation */}
           {showDeleteConfirm && (
             <div className="bg-red-50 border-x border-red-200 px-5 py-4 flex items-center justify-between gap-4">
@@ -557,7 +682,7 @@ export function StudentChat() {
           <div
             ref={messagesContainerRef}
             onScroll={handleMessagesScroll}
-            className={`flex-1 min-h-0 bg-white/90 backdrop-blur-xl px-5 pt-0 pb-5 overflow-y-auto border-x border-pink-200 relative z-10 scrollbar-fade ${isScrolling ? 'scrollbar-fade--active' : ''}`}
+            className={`flex-1 min-h-0 bg-white/90 backdrop-blur-xl px-4 sm:px-5 pt-0 pb-5 overflow-y-auto border-x border-pink-200 relative z-10 scrollbar-fade overscroll-contain ${isScrolling ? 'scrollbar-fade--active' : ''}`}
           >
             {session.messages.length === 0 ? (
               <div className="flex items-center justify-center h-full">
@@ -595,10 +720,11 @@ export function StudentChat() {
                 ))}
               </div>
             )}
+            <div ref={messagesEndRef} />
           </div>
 
           {/* Input Area */}
-          <div className="bg-white/95 backdrop-blur-xl rounded-b-2xl shadow-lg border border-pink-200 border-t-0 p-4 relative z-20">
+          <div className="bg-white/95 backdrop-blur-xl rounded-b-2xl shadow-lg border border-pink-200 border-t-0 px-4 sm:px-5 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] relative z-20 shrink-0">
             {session.status === 'resolved' ? (
               <div className="text-center py-3">
                 <p className="text-sm text-gray-600 mb-3">This conversation has been resolved by your counselor.</p>
@@ -618,7 +744,7 @@ export function StudentChat() {
                   onKeyDown={handleKeyPress}
                   placeholder="Type your message here..."
                   rows={2}
-                  className="flex-1 px-4 py-3 bg-gray-50 border border-pink-200 rounded-xl resize-none focus:outline-none focus:border-pink-400 focus:ring-2 focus:ring-pink-100 focus:bg-white transition-all text-gray-900 placeholder-gray-400 text-sm"
+                  className="flex-1 px-4 py-3 bg-gray-50 border border-pink-200 rounded-xl resize-none focus:outline-none focus:border-pink-400 focus:ring-2 focus:ring-pink-100 focus:bg-white transition-all text-gray-900 placeholder-gray-400 text-base sm:text-sm leading-6"
                 />
                 <button
                   onClick={sendMessage}

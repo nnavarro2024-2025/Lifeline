@@ -1,25 +1,157 @@
 
-  # Lifeline
+# Lifeline
 
+## Overview
 
-  ## Running the code
+Lifeline is a React + Vite frontend with a Node + Express API and a MySQL (XAMPP MariaDB) database.
 
-  Run `npm i` to install the dependencies.
+Default local addresses:
 
-  Run `npm run dev` to start the development server.
+- Frontend: http://localhost:5173
+- API: http://localhost:3001
+- Database: MySQL/MariaDB on port 3306
 
-  ## Install notes
+## Quick Start (Most Important)
 
-  If `npm i` shows a warning about `recharts@2.15.2`, that package version is deprecated upstream. The app can still install and run, but Recharts should be updated to v3 in a future dependency refresh.
+Use two terminals every time you run the system.
 
-  If npm reports a vulnerability, run `npm audit` to see which package is affected before using `npm audit fix --force`, since the force option can introduce breaking changes.
+Terminal A (API):
 
-  ## Current updates
+```bash
+npm run api
+```
 
-  - Login page is now the first screen at `/`, with supportive taglines, email and password fields, a simulated Google UIC sign-in modal, a demo account picker, and a Create account link.
-  - Register page is available at `/register` with full name, UIC email validation, password strength feedback, and confirm password.
-  - Authentication now auto-detects role from email, sending pre-set counselor accounts to the counselor dashboard and everyone else to the student view.
-  - Student chat now uses a setup, chatting, and resolved flow, supports only one active conversation, and lets students switch between real name and nickname or delete the conversation with confirmation.
-  - Counselor dashboard now includes Active and Archived tabs, with resolved conversations grouped by risk level and deleted student conversations removed in real time.
-  - Anonymity now generates calming nicknames that stay consistent for the whole conversation and change only when a new conversation starts.
+Terminal B (Frontend):
+
+```bash
+npm run dev
+```
+
+If you run only the frontend, login/register/chat will fail.
+
+## First-Time Setup (Fresh Clone)
+
+1. Install dependencies.
+
+```bash
+npm install
+```
+
+2. Start MySQL in XAMPP.
+
+3. Import schema from [db/lifeline_schema.sql](db/lifeline_schema.sql).
+
+4. Create server env file.
+
+- Copy [server/.env.example](server/.env.example) to server/.env.
+
+5. Create frontend env file at project root named .env.
+
+```env
+VITE_GOOGLE_CLIENT_ID=your-google-oauth-client-id.apps.googleusercontent.com
+```
+
+6. (Only for older databases) run migration:
+
+```bash
+node server/migrate_first_last_name.js
+```
+
+## Required Environment Variables
+
+Server (server/.env):
+
+- API_PORT=3001
+- FRONTEND_ORIGIN=http://localhost:5173
+- GOOGLE_CLIENT_ID=your-google-oauth-client-id.apps.googleusercontent.com
+- DB_HOST=127.0.0.1
+- DB_PORT=3306
+- DB_USER=root
+- DB_PASSWORD=
+- DB_NAME=lifeline_db
+
+Frontend (project root .env):
+
+- VITE_GOOGLE_CLIENT_ID=your-google-oauth-client-id.apps.googleusercontent.com
+- VITE_API_BASE_URL (optional)
+
+API base URL behavior:
+
+- If VITE_API_BASE_URL is set, frontend uses it.
+- If not set, frontend auto-uses current browser host on port 3001.
+- Example: http://localhost:5173 -> http://localhost:3001
+- Example: http://10.0.0.108:5173 -> http://10.0.0.108:3001
+
+## Phone / LAN Testing
+
+1. Find your PC LAN IP (example: 10.0.0.108).
+
+2. Run frontend with host enabled:
+
+```bash
+npm run dev -- --host 0.0.0.0 --port 5173
+```
+
+3. Keep API running:
+
+```bash
+npm run api
+```
+
+4. Open on phone:
+
+- http://YOUR_PC_LAN_IP:5173
+
+5. Verify API from phone browser:
+
+- http://YOUR_PC_LAN_IP:3001/health
+
+If phone can open health but app still fails, hard refresh phone browser and ensure Windows Firewall allows Node.js on Private network.
+
+## Google Sign-In Notes
+
+1. Use OAuth 2.0 Client ID (Web application) in Google Cloud.
+
+2. Authorized JavaScript origins should include at least:
+
+- http://localhost
+- http://localhost:5173
+
+3. Use the same client ID in both:
+
+- server/.env -> GOOGLE_CLIENT_ID
+- project .env -> VITE_GOOGLE_CLIENT_ID
+
+4. If you change origins/client IDs, restart both servers.
+
+## Demo Accounts
+
+Student:
+
+- Email: student@uic.edu.ph
+- Password: student123
+
+Counselor:
+
+- Email: counselor@uic.edu.ph
+- Password: counselor123
+
+## Troubleshooting
+
+### Unable to connect to the server / Failed to fetch
+
+1. Confirm API is running at http://localhost:3001.
+2. Confirm MySQL is running and server/.env DB values are correct.
+3. Confirm frontend is also running.
+4. For phone/LAN, use host mode on Vite and open LAN IP, not localhost.
+
+### Google origin error (unregistered_origin)
+
+1. Confirm browser origin exactly matches an Authorized JavaScript origin in Google Cloud.
+2. Save OAuth settings, wait a few minutes, restart servers, hard refresh browser.
+
+## Install Notes
+
+- If npm install warns about recharts@2.15.2, that version is deprecated upstream. The app can still run.
+- If npm reports vulnerabilities, check npm audit before using npm audit fix --force.
   

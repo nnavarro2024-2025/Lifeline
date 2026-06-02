@@ -1,26 +1,129 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, Link } from 'react-router';
-import { Heart, Eye, EyeOff, Mail, Lock, Sparkles, X, AlertCircle } from 'lucide-react';
+import { Heart, Eye, EyeOff, Mail, Lock, Sparkles, AlertCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
-const DEMO_GOOGLE_ACCOUNTS = [
-  { email: 'student@uic.edu', label: 'Juan Dela Cruz', role: 'Student' },
-  { email: 'counselor@uic.edu', label: 'Dr. Reyes', role: 'Counselor' },
-  { email: 'guidance@uic.edu', label: 'Ms. Santos', role: 'Counselor' },
-];
+const GOOGLE_IDENTITY_SCRIPT_SRC = 'https://accounts.google.com/gsi/client';
+const GOOGLE_CLIENT_ID =
+  (import.meta as unknown as { env?: { VITE_GOOGLE_CLIENT_ID?: string } }).env?.VITE_GOOGLE_CLIENT_ID || '';
+
+let googleScriptPromise: Promise<void> | null = null;
+
+function loadGoogleIdentityScript() {
+  if ((window as any).google?.accounts?.id) {
+    return Promise.resolve();
+  }
+
+  if (googleScriptPromise) {
+    return googleScriptPromise;
+  }
+
+  googleScriptPromise = new Promise<void>((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${GOOGLE_IDENTITY_SCRIPT_SRC}"]`) as HTMLScriptElement | null;
+    if (existing) {
+      existing.addEventListener('load', () => resolve(), { once: true });
+      existing.addEventListener('error', () => reject(new Error('Failed to load Google Sign-In SDK.')), { once: true });
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = GOOGLE_IDENTITY_SCRIPT_SRC;
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('Failed to load Google Sign-In SDK.'));
+    document.head.appendChild(script);
+  }).catch(error => {
+    googleScriptPromise = null;
+    throw error;
+  });
+
+  return googleScriptPromise;
+}
 
 export function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
-  const [showGoogleModal, setShowGoogleModal] = useState(false);
-  const [googleEmail, setGoogleEmail] = useState('');
-  const [googleError, setGoogleError] = useState('');
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const navigate = useNavigate();
   const { login, loginWithGoogle } = useAuth();
+  const googleButtonRef = useRef<HTMLDivElement>(null);
 
-  const handleSignIn = (e: React.FormEvent) => {
+  const processGoogleCredential = async (idToken: string) => {
+    setIsGoogleLoading(true);
+
+    try {
+      const result = await loginWithGoogle(idToken);
+      if (!result.success) {
+        setError(result.error || 'Google sign in failed.');
+        return;
+      }
+
+      if (result.user?.role === 'counselor') {
+        navigate('/counselor');
+      } else {
+        navigate('/student');
+      }
+    } catch (googleError) {
+      setError(googleError instanceof Error ? googleError.message : 'Google sign in failed.');
+    } finally {
+      setIsGoogleLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!GOOGLE_CLIENT_ID || !googleButtonRef.current) return;
+
+    let cancelled = false;
+
+    const renderGoogleButton = async () => {
+      await loadGoogleIdentityScript();
+      if (cancelled || !googleButtonRef.current) return;
+
+      const google = (window as any).google;
+      if (!google?.accounts?.id) {
+        throw new Error('Google Sign-In SDK did not initialize correctly.');
+      }
+
+      google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: (response: { credential?: string }) => {
+          if (!response?.credential) {
+            setError('Google sign-in did not return a credential.');
+            return;
+          }
+
+          void processGoogleCredential(response.credential);
+        },
+      });
+
+      googleButtonRef.current.innerHTML = '';
+      google.accounts.id.renderButton(googleButtonRef.current, {
+        theme: 'outline',
+        size: 'large',
+        shape: 'pill',
+        text: 'signin_with',
+        width: googleButtonRef.current.clientWidth || 360,
+      });
+    };
+
+    renderGoogleButton().catch(error => {
+      if (!cancelled) {
+        setError(error instanceof Error ? error.message : 'Google sign-in is unavailable right now.');
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      if (googleButtonRef.current) {
+        googleButtonRef.current.innerHTML = '';
+      }
+    };
+  }, []);
+
+  const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
@@ -28,52 +131,26 @@ export function Login() {
       setError('Please enter your email address.');
       return;
     }
+    if (!email.toLowerCase().trim().endsWith('@uic.edu.ph')) {
+      setError('Please use your UIC email address (@uic.edu.ph).');
+      return;
+    }
     if (!password.trim()) {
       setError('Please enter your password.');
       return;
     }
 
-    const result = login(email, password);
+    const result = await login(email, password);
     if (!result.success) {
       setError(result.error || 'Sign in failed. Please try again.');
       return;
     }
 
-    // Route based on role
-    redirectAfterLogin();
-  };
-
-  const redirectAfterLogin = () => {
-    // The auth state is set, so we read from the updated context via a fresh check
-    // Using a small workaround since state updates are async
-    const storedEmail = email.toLowerCase().trim();
-    const counselorEmails = ['counselor@uic.edu', 'dr.reyes@uic.edu', 'guidance@uic.edu', 'advisor@uic.edu', 'admin@uic.edu'];
-    if (counselorEmails.includes(storedEmail)) {
+    if (result.user?.role === 'counselor') {
       navigate('/counselor');
     } else {
       navigate('/student');
     }
-  };
-
-  const handleGoogleSignIn = (selectedEmail: string) => {
-    setGoogleError('');
-    const result = loginWithGoogle(selectedEmail);
-    if (!result.success) {
-      setGoogleError(result.error || 'Sign in failed.');
-      return;
-    }
-    setShowGoogleModal(false);
-    const counselorEmails = ['counselor@uic.edu', 'dr.reyes@uic.edu', 'guidance@uic.edu', 'advisor@uic.edu', 'admin@uic.edu'];
-    if (counselorEmails.includes(selectedEmail.toLowerCase())) {
-      navigate('/counselor');
-    } else {
-      navigate('/student');
-    }
-  };
-
-  const handleGoogleCustomEmail = (e: React.FormEvent) => {
-    e.preventDefault();
-    handleGoogleSignIn(googleEmail);
   };
 
   return (
@@ -138,7 +215,7 @@ export function Login() {
                   type="email"
                   value={email}
                   onChange={e => { setEmail(e.target.value); setError(''); }}
-                  placeholder="your.name@uic.edu"
+                  placeholder="your.name@uic.edu.ph"
                   className="w-full pl-11 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:border-pink-400 focus:ring-2 focus:ring-pink-100 focus:bg-white transition-all text-gray-900 placeholder-gray-400"
                 />
               </div>
@@ -188,19 +265,11 @@ export function Login() {
           </div>
 
           {/* Google / UIC Gmail button */}
-          <button
-            type="button"
-            onClick={() => { setShowGoogleModal(true); setGoogleEmail(''); setGoogleError(''); }}
-            className="w-full flex items-center justify-center gap-3 bg-white hover:bg-gray-50 border border-gray-300 hover:border-gray-400 text-gray-700 font-medium py-3.5 px-6 rounded-xl transition-all shadow-sm hover:shadow-md"
-          >
-            <svg className="w-5 h-5" viewBox="0 0 24 24">
-              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-            </svg>
-            Sign in with UIC Gmail Account
-          </button>
+          <div ref={googleButtonRef} className="w-full min-h-[48px] flex items-center justify-center" />
+
+          {isGoogleLoading && (
+            <p className="mt-3 text-center text-xs text-gray-500">Signing in with Google...</p>
+          )}
 
           {/* Sign up link */}
           <p className="text-center text-sm text-gray-500 mt-5">
@@ -215,96 +284,13 @@ export function Login() {
         <div className="mt-4 p-4 bg-white/60 backdrop-blur-sm border border-pink-100 rounded-2xl shadow-sm">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Demo Accounts</p>
           <div className="space-y-1 text-xs text-gray-600">
-            <p>Student: <span className="font-mono font-medium text-gray-800">student@uic.edu</span> / student123</p>
-            <p>Counselor: <span className="font-mono font-medium text-gray-800">counselor@uic.edu</span> / counselor123</p>
-            <p className="text-gray-400 italic">Or sign up with any @uic.edu email</p>
+            <p>Student: <span className="font-mono font-medium text-gray-800">student@uic.edu.ph</span> / student123</p>
+            <p>Counselor: <span className="font-mono font-medium text-gray-800">counselor@uic.edu.ph</span> / counselor123</p>
+            <p className="text-gray-400 italic">Or sign up with any @uic.edu.ph email</p>
           </div>
         </div>
       </div>
 
-      {/* Google Login Modal */}
-      {showGoogleModal && (
-        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 relative">
-            <button
-              onClick={() => setShowGoogleModal(false)}
-              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="flex items-center gap-3 mb-2">
-              <svg className="w-7 h-7" viewBox="0 0 24 24">
-                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-              </svg>
-              <div>
-                <p className="font-semibold text-gray-800">Sign in with Google</p>
-                <p className="text-xs text-gray-500">UIC Account</p>
-              </div>
-            </div>
-
-            {googleError && (
-              <div className="mb-3 flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-xs">
-                <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-                <span>{googleError}</span>
-              </div>
-            )}
-
-            <p className="text-sm text-gray-600 mb-3">Choose an account or enter your UIC email:</p>
-
-            {/* Demo accounts */}
-            <div className="space-y-2 mb-4">
-              {DEMO_GOOGLE_ACCOUNTS.map(account => (
-                <button
-                  key={account.email}
-                  onClick={() => handleGoogleSignIn(account.email)}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl border border-gray-200 hover:border-pink-300 hover:bg-pink-50 transition-all text-left"
-                >
-                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-pink-400 to-rose-400 flex items-center justify-center text-white font-semibold text-sm flex-shrink-0">
-                    {account.label[0]}
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-800">{account.label}</p>
-                    <p className="text-xs text-gray-500">{account.email}</p>
-                  </div>
-                  <span className={`ml-auto text-xs px-2 py-0.5 rounded-full font-medium ${
-                    account.role === 'Counselor'
-                      ? 'bg-purple-100 text-purple-700'
-                      : 'bg-pink-100 text-pink-700'
-                  }`}>
-                    {account.role}
-                  </span>
-                </button>
-              ))}
-            </div>
-
-            <div className="flex items-center gap-3 mb-3">
-              <div className="flex-1 border-t border-gray-200" />
-              <span className="text-xs text-gray-400">or use another</span>
-              <div className="flex-1 border-t border-gray-200" />
-            </div>
-
-            <form onSubmit={handleGoogleCustomEmail} className="flex gap-2">
-              <input
-                type="email"
-                value={googleEmail}
-                onChange={e => { setGoogleEmail(e.target.value); setGoogleError(''); }}
-                placeholder="name@uic.edu"
-                className="flex-1 px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:border-pink-400 focus:bg-white transition-all"
-              />
-              <button
-                type="submit"
-                className="bg-gradient-to-r from-pink-500 to-rose-500 text-white text-sm font-medium px-4 py-2.5 rounded-lg hover:from-pink-600 hover:to-rose-600 transition-all"
-              >
-                Go
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
